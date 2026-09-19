@@ -1,0 +1,48 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #1a1b1e;
+  color: #e8e8ea;
+  font-family: system-ui, sans-serif;
+  overflow: hidden;
+}
+#layout { display: flex; height: 100vh; }
+#stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: repeating-conic-gradient(#242529 0% 25%, #1d1e21 0% 50%) 50% / 32px 32px;
+}
+#stage > canvas, #stage > img { position: absolute; }
+#panel {
+  width: 320px;
+  max-width: 45vw;
+  box-sizing: border-box;
+  padding: 16px;
+  background: #202126;
+  border-left: 1px solid #34353a;
+  overflow-y: auto;
+}
+h1 { font-size: 15px; margin: 0 0 12px; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #9aa; margin: 18px 0 8px; }
+label { display: block; font-size: 12px; color: #a0a0a8; margin: 8px 0 3px; }
+input[type="text"] {
+  width: 100%; box-sizing: border-box; padding: 6px 8px;
+  background: #17181b; color: #e8e8ea; border: 1px solid #34353a; border-radius: 6px; font-size: 13px;
+}
+button {
+  background: #2a2c33; color: #e8e8ea; border: 1px solid #3a3b40;
+  border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+}
+button:hover { background: #34363d; }
+button.primary { background: #7aa2f7; color: #14151a; border-color: #7aa2f7; font-weight: 600; }
+button.active { outline: 2px solid #7aa2f7; }
+.row { display: flex; gap: 8px; }
+.row > * { flex: 1; }
+#emotes, #states { display: flex; flex-wrap: wrap; gap: 6px; }
+#emotes button { flex: 0 0 auto; }
+#status {
+  position: fixed; left: 12px; bottom: 12px; font-size: 12px; color: #cdd;
+  background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px; max-width: calc(100vw - 360px);
+}
+.hint { font-size: 11px; color: #71727a; margin-top: 4px; }

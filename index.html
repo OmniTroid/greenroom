@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Green Room</title>
+  </head>
+  <body>
+    <div id="layout">
+      <div id="stage"></div>
+      <div id="panel">
+        <h1>Green Room</h1>
+
+        <label for="host">Asset host</label>
+        <input id="host" type="text" placeholder="https://example.com/base/" />
+        <label for="char">Character folder</label>
+        <input id="char" type="text" placeholder="Fenomeno3D" />
+        <div class="row" style="margin-top: 10px;">
+          <button id="load" class="primary">Load character</button>
+        </div>
+        <div class="hint">
+          Reads char.ini. 3D if it has <code>[options] model = &lt;file&gt;.pmx</code>,
+          otherwise 2D sprites. Binary 3D assets need a CORS-enabled host.
+        </div>
+
+        <h2>Animation phase</h2>
+        <div id="states">
+          <button data-state="idle" class="active">Idle</button>
+          <button data-state="talking">Talking</button>
+          <button data-state="preanim">Preanim</button>
+        </div>
+        <div class="hint">3D talking layers mouth morphs over the idle motion.</div>
+
+        <h2>Emotes</h2>
+        <div id="emotes"><span class="hint">Load a character to list emotes.</span></div>
+
+        <h2>Play a file by name</h2>
+        <label for="raw">Base name (no extension)</label>
+        <input id="raw" type="text" placeholder="idle" />
+        <div class="row" style="margin-top: 8px;">
+          <button id="playraw">Play file</button>
+        </div>
+      </div>
+    </div>
+    <div id="status">Enter a host + character, then Load.</div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
