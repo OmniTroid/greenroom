@@ -19,7 +19,9 @@ const LOCAL = "/@local";
 // straight off an absolute local path via /@local + a /@list directory index.
 const server = Bun.serve({
   port: PORT,
-  development: true,
+  // Full page reload on change, not HMR: the WebGL/physics renderer holds
+  // imperative state that can't be hot-swapped in place.
+  development: { hmr: false },
   routes: {
     "/": index,
     "/index.html": index,
