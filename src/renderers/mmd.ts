@@ -7,8 +7,12 @@ import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 
+import "@babylonjs/core/Physics/physicsEngineComponent";
 import "babylon-mmd/esm/Loader/pmxLoader";
 import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeModelAnimation";
+import ammoPhysics from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm";
+import { MmdAmmoJSPlugin } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoJSPlugin";
+import { MmdAmmoPhysics } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoPhysics";
 import { SdefInjector } from "babylon-mmd/esm/Loader/sdefInjector";
 import { MmdStandardMaterialBuilder } from "babylon-mmd/esm/Loader/mmdStandardMaterialBuilder";
 import { MmdMaterialRenderMethod } from "babylon-mmd/esm/Loader/materialBuilderBase";
@@ -80,7 +84,8 @@ export class MmdRenderer implements CharacterRenderer {
   private engine: Engine;
   private scene: Scene;
   private camera: ArcRotateCamera;
-  private runtime: MmdRuntime;
+  private runtime!: MmdRuntime;
+  private runtimeReady?: Promise<void>;
   private materialBuilder: MmdStandardMaterialBuilder;
   private vmdLoader: VmdLoader;
 
@@ -117,17 +122,6 @@ export class MmdRenderer implements CharacterRenderer {
     const dir = new DirectionalLight("dir", new Vector3(0.4, -1, 0.6), this.scene);
     dir.intensity = 0.7;
 
-    this.runtime = new MmdRuntime(this.scene);
-    this.runtime.register(this.scene);
-    this.runtime.onPauseAnimationObservable.add(() => {
-      if (!this.looping) return;
-      const duration = this.runtime.animationFrameTimeDuration;
-      if (duration > 0 && this.runtime.currentFrameTime >= duration - 1e-3) {
-        this.runtime.seekAnimation(0, true);
-        void this.runtime.playAnimation();
-      }
-    });
-
     this.materialBuilder = new MmdStandardMaterialBuilder();
     this.materialBuilder.renderMethod = MmdMaterialRenderMethod.AlphaEvaluation;
     this.guardTextureLoader();
@@ -141,6 +135,32 @@ export class MmdRenderer implements CharacterRenderer {
   }
 
   private onResize: () => void;
+
+  // Create the MMD runtime with an Ammo physics world (once) so PMX rigid
+  // bodies and joints (skirt, hair, tail) are simulated. Ammo init is async,
+  // so this is awaited before load.
+  private ensureRuntime(): Promise<void> {
+    if (!this.runtimeReady) this.runtimeReady = this.initRuntime();
+    return this.runtimeReady;
+  }
+
+  private async initRuntime(): Promise<void> {
+    // The bundler points Ammo's wasm at a blocked file:// URL; the dev server
+    // serves it here (see server.ts) so the fetch is same-origin HTTP.
+    const ammoInstance = await ammoPhysics({ locateFile: () => "/vendor/ammo.wasm.wasm" });
+    const plugin = new MmdAmmoJSPlugin(true, ammoInstance);
+    this.scene.enablePhysics(new Vector3(0, -98, 0), plugin);
+    this.runtime = new MmdRuntime(this.scene, new MmdAmmoPhysics(this.scene));
+    this.runtime.register(this.scene);
+    this.runtime.onPauseAnimationObservable.add(() => {
+      if (!this.looping) return;
+      const duration = this.runtime.animationFrameTimeDuration;
+      if (duration > 0 && this.runtime.currentFrameTime >= duration - 1e-3) {
+        this.runtime.seekAnimation(0, true);
+        void this.runtime.playAnimation();
+      }
+    });
+  }
 
   mount(container: HTMLElement): void {
     container.appendChild(this.canvas);
@@ -193,6 +213,7 @@ export class MmdRenderer implements CharacterRenderer {
 
   private async loadModel(): Promise<LoadedModel | null> {
     try {
+      await this.ensureRuntime();
       const url = this.char.source.url(this.char.model ?? "");
       if (!url) {
         console.warn(`Model ${this.char.model} not found for ${this.char.name}`);
@@ -215,7 +236,7 @@ export class MmdRenderer implements CharacterRenderer {
         },
       });
       const mesh = result.meshes[0] as MmdMesh;
-      const mmdModel = this.runtime.createMmdModel(mesh);
+      const mmdModel = this.runtime.createMmdModel(mesh, { buildPhysics: true });
       const { target, radius } = this.frameFromSkeleton(mesh, result.skeletons?.[0]);
       const morphNames = Array.from(
         (mmdModel.morph as unknown as { _morphIndexMap: Map<string, number[]> })._morphIndexMap.keys(),

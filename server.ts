@@ -38,6 +38,15 @@ const server = Bun.serve({
       }
     }
 
+    // babylon-mmd's Ammo glue locates its wasm relative to its own module URL,
+    // which the bundler resolves to a blocked file:// path; serve it over HTTP
+    // so the renderer can point Ammo's locateFile here instead.
+    if (pathname === "/vendor/ammo.wasm.wasm") {
+      return new Response(
+        Bun.file("./node_modules/babylon-mmd/esm/Runtime/Physics/External/ammo.wasm.wasm"),
+      );
+    }
+
     if (pathname.startsWith(`${LOCAL}/`)) {
       const file = Bun.file(pathname.slice(LOCAL.length));
       if (await file.exists()) return new Response(file);
