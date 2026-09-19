@@ -1,5 +1,6 @@
 import "./index.css";
 import { loadCharacter, type CharacterConfig, type EmoteEntry, type EmoteState } from "./character";
+import { RemoteAssetSource, LocalAssetSource, type AssetSource } from "./assets";
 import { createRenderer, type CharacterRenderer } from "./renderers";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -7,6 +8,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const hostInput = $<HTMLInputElement>("host");
 const charInput = $<HTMLInputElement>("char");
 const loadBtn = $<HTMLButtonElement>("load");
+const pickDirBtn = $<HTMLButtonElement>("pickdir");
 const emotesEl = $<HTMLDivElement>("emotes");
 const statusEl = $<HTMLDivElement>("status");
 const stage = $<HTMLDivElement>("stage");
@@ -36,6 +38,22 @@ loadBtn.addEventListener("click", () => {
 });
 charInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") loadBtn.click();
+});
+
+pickDirBtn.addEventListener("click", async () => {
+  if (!window.showDirectoryPicker) {
+    setStatus("This browser has no folder picker (needs a Chromium-based browser).");
+    return;
+  }
+  let dir: FileSystemDirectoryHandle;
+  try {
+    dir = await window.showDirectoryPicker({ id: "greenroom-char", mode: "read" });
+  } catch {
+    return; // user dismissed the picker
+  }
+  setStatus(`Reading ${dir.name}…`);
+  const source = await LocalAssetSource.fromDirectory(dir);
+  await load(source, dir.name);
 });
 
 for (const btn of stateButtons) {
@@ -76,24 +94,17 @@ const renderEmotes = (emotes: EmoteEntry[]): void => {
 const applyEmote = async (emote: EmoteEntry): Promise<void> => {
   if (!renderer || !character) return;
   currentEmote = emote;
-  setStatus(`${character.name} — ${emote.emote} — ${state}…`);
+  setStatus(`${character.name} · ${emote.emote} · ${state}…`);
   await renderer.setEmote(emote, state);
-  setStatus(`${character.name} — ${emote.emote} — ${state}`);
+  setStatus(`${character.name} · ${emote.emote} · ${state}`);
 };
 
-const boot = async (): Promise<void> => {
-  const name = (params.get("char") ?? "").trim();
-  if (!name) {
-    setStatus("Enter a host + character, then Load.");
-    return;
-  }
-  const host = hostInput.value.trim();
-
+const load = async (source: AssetSource, name: string): Promise<void> => {
   setStatus(`Loading char.ini for ${name}…`);
   try {
-    character = await loadCharacter(host, name);
+    character = await loadCharacter(source, name);
   } catch {
-    setStatus(`Could not load char.ini for ${name} (host: ${host}).`);
+    setStatus(`Could not load char.ini for ${name} (${source.label}).`);
     return;
   }
 
@@ -107,10 +118,19 @@ const boot = async (): Promise<void> => {
   if (first) {
     emotesEl.querySelector("button")?.classList.add("active");
     await applyEmote(first);
-    setStatus(`${character.name} — ${kind} — ${first.emote} — ${state}`);
+    setStatus(`${character.name} · ${kind} · ${first.emote} · ${state}`);
   } else {
-    setStatus(`${character.name} — ${kind} — no emotes`);
+    setStatus(`${character.name} · ${kind} · no emotes`);
   }
+};
+
+const boot = async (): Promise<void> => {
+  const name = (params.get("char") ?? "").trim();
+  if (!name) {
+    setStatus("Enter a host + character then Load, or open a local folder.");
+    return;
+  }
+  await load(new RemoteAssetSource(hostInput.value.trim(), name), name);
 };
 
 void boot();

@@ -151,16 +151,12 @@ export class MmdRenderer implements CharacterRenderer {
     const model = await this.ensureModel();
     if (!model) return;
 
-    const folder = this.char.folder;
-    const baseCandidates = [
-      `${folder}${encodeURI(emote.emote)}.vmd`,
-      `${folder}${encodeURI(`(a)${emote.emote}`)}.vmd`,
-    ];
+    const baseCandidates = [`${emote.emote}.vmd`, `(a)${emote.emote}.vmd`];
 
     if (state === "preanim") {
       this.stopTalk();
-      const preanimUrl = emote.preanim ? `${folder}${encodeURI(emote.preanim)}.vmd` : null;
-      const handle = await this.resolveHandle(model, preanimUrl ? [preanimUrl] : baseCandidates);
+      const preanimRel = emote.preanim ? `${emote.preanim}.vmd` : null;
+      const handle = await this.resolveHandle(model, preanimRel ? [preanimRel] : baseCandidates);
       if (handle) this.playHandle(model, handle, false);
       return;
     }
@@ -175,9 +171,7 @@ export class MmdRenderer implements CharacterRenderer {
   async playRaw(baseName: string): Promise<void> {
     const model = await this.ensureModel();
     if (!model) return;
-    const handle = await this.resolveHandle(model, [
-      `${this.char.folder}${encodeURI(baseName)}.vmd`,
-    ]);
+    const handle = await this.resolveHandle(model, [`${baseName}.vmd`]);
     if (handle) this.playHandle(model, handle, true);
   }
 
@@ -199,9 +193,26 @@ export class MmdRenderer implements CharacterRenderer {
 
   private async loadModel(): Promise<LoadedModel | null> {
     try {
-      const url = `${this.char.folder}${encodeURI(this.char.model ?? "")}`;
+      const url = this.char.source.url(this.char.model ?? "");
+      if (!url) {
+        console.warn(`Model ${this.char.model} not found for ${this.char.name}`);
+        return null;
+      }
+      // Local folders hand babylon-mmd the textures directly (blob URLs can't
+      // resolve the .pmx's relative texture paths); remote hosts return none,
+      // so textures load by URL relative to the model as before.
+      const referenceFiles = await this.char.source.textureFiles();
+      const modelFile = this.char.model ?? "";
       const result = await ImportMeshAsync(url, this.scene, {
-        pluginOptions: { mmdmodel: { materialBuilder: this.materialBuilder } },
+        // A blob: URL carries no extension, so name the plugin explicitly.
+        pluginExtension: modelFile.slice(modelFile.lastIndexOf(".")) || ".pmx",
+        name: modelFile,
+        pluginOptions: {
+          mmdmodel: {
+            materialBuilder: this.materialBuilder,
+            ...(referenceFiles ? { referenceFiles: referenceFiles as unknown as readonly File[] } : {}),
+          },
+        },
       });
       const mesh = result.meshes[0] as MmdMesh;
       const mmdModel = this.runtime.createMmdModel(mesh);
@@ -278,7 +289,9 @@ export class MmdRenderer implements CharacterRenderer {
     model: LoadedModel,
     candidates: string[],
   ): Promise<MmdRuntimeAnimationHandle | null> {
-    for (const url of candidates) {
+    for (const rel of candidates) {
+      const url = this.char.source.url(rel);
+      if (!url) continue;
       const cached = model.handles.get(url);
       if (cached) return cached;
       const anim = await this.loadMotion(url);

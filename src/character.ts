@@ -1,5 +1,5 @@
 import { parseCharIni, type CharIni } from "aolib-ts";
-import { request } from "./request";
+import type { AssetSource } from "./assets";
 
 /** Animation phase a character can be shown in. Applies to 2D and 3D alike. */
 export type EmoteState = "idle" | "talking" | "preanim";
@@ -22,10 +22,8 @@ export interface EmoteEntry {
  */
 export interface CharacterConfig {
   name: string;
-  /** Asset host with trailing slash, e.g. "https://host/base/". */
-  host: string;
-  /** Full character folder URL: `${host}characters/${name.toLowerCase()}/`. */
-  folder: string;
+  /** Where this character's files come from (remote host or local folder). */
+  source: AssetSource;
   showname: string;
   side: string;
   /** PMX file name for 3D characters, or null for 2D. */
@@ -36,18 +34,13 @@ export interface CharacterConfig {
   charIni: CharIni;
 }
 
-const withTrailingSlash = (host: string): string =>
-  host && !host.endsWith("/") ? `${host}/` : host;
-
 /**
- * Fetches a character's char.ini and folds it (via aolib-ts `parseCharIni`)
- * into a renderer-agnostic config. Values are lowercased at the point of use
- * here, since asset URLs are case-insensitive by AO convention.
+ * Reads a character's char.ini from the given source and folds it (via aolib-ts
+ * `parseCharIni`) into a renderer-agnostic config. Values are lowercased at the
+ * point of use here, since asset paths are case-insensitive by AO convention.
  */
-export async function loadCharacter(rawHost: string, name: string): Promise<CharacterConfig> {
-  const host = withTrailingSlash(rawHost.trim());
-  const folder = `${host}characters/${encodeURI(name.toLowerCase())}/`;
-  const charIni = parseCharIni(await request(`${folder}char.ini`));
+export async function loadCharacter(source: AssetSource, name: string): Promise<CharacterConfig> {
+  const charIni = parseCharIni(await source.text("char.ini"));
 
   const model = (charIni.options.model ?? "").trim().toLowerCase();
   const emotes: EmoteEntry[] = charIni.emotes.map((e) => ({
@@ -59,8 +52,7 @@ export async function loadCharacter(rawHost: string, name: string): Promise<Char
 
   return {
     name,
-    host,
-    folder,
+    source,
     showname: charIni.options.showname || name,
     side: (charIni.options.side || "wit").toLowerCase(),
     model: model || null,

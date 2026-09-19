@@ -46,15 +46,16 @@ export class SpriteRenderer implements CharacterRenderer {
   private async resolve(prefix: string, name: string): Promise<string | null> {
     const candidates: string[] = [];
     for (const ext of EXTENSIONS) {
-      candidates.push(`${this.char.folder}${encodeURI(prefix + name)}${ext}`);
+      candidates.push(`${prefix}${name}${ext}`);
       // Some packs nest prefixed frames in an "(a)"/"(b)" folder.
-      if (prefix) candidates.push(`${this.char.folder}${encodeURI(prefix)}/${encodeURI(name)}${ext}`);
+      if (prefix) candidates.push(`${prefix}/${name}${ext}`);
     }
     // Unprefixed fallback (e.g. a plain `<emote>.png`).
-    candidates.push(`${this.char.folder}${encodeURI(name)}.png`);
+    candidates.push(`${name}.png`);
 
-    for (const url of candidates) {
-      if (await imageExists(url)) return url;
+    for (const rel of candidates) {
+      const url = this.char.source.url(rel);
+      if (url && (await imageExists(url))) return url;
     }
     return null;
   }

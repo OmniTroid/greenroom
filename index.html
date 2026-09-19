@@ -17,10 +17,13 @@
         <input id="char" type="text" placeholder="Fenomeno3D" />
         <div class="row" style="margin-top: 10px;">
           <button id="load" class="primary">Load character</button>
+          <button id="pickdir">Open folder…</button>
         </div>
         <div class="hint">
           Reads char.ini. 3D if it has <code>[options] model = &lt;file&gt;.pmx</code>,
-          otherwise 2D sprites. Binary 3D assets need a CORS-enabled host.
+          otherwise 2D sprites. Binary 3D assets from a host need CORS; "Open
+          folder…" loads a character folder off your disk instead (no CORS,
+          textures included).
         </div>
 
         <h2>Animation phase</h2>
