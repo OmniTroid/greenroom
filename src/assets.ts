@@ -14,6 +14,11 @@ export interface AssetSource {
   /** A loadable URL for a folder-relative asset, or null if known-absent. */
   url(path: string): string | null;
   /**
+   * Folder-relative paths of every file with the given extension (e.g. ".vmd"),
+   * sorted. null when the source can't be enumerated (a remote host).
+   */
+  list(extension: string): string[] | null;
+  /**
    * babylon-mmd reference files so a .pmx resolves its textures from the picked
    * folder instead of the network. undefined for remote sources, whose textures
    * load by URL relative to the model.
@@ -41,6 +46,52 @@ export class RemoteAssetSource implements AssetSource {
 
   url(path: string): string {
     return this.base + encodeURI(path);
+  }
+
+  list(): null {
+    return null;
+  }
+
+  async textureFiles(): Promise<undefined> {
+    return undefined;
+  }
+}
+
+/**
+ * Serves a character from an absolute local folder read by the dev server
+ * (`/@local` + `/@list`). Unlike the File System Access picker this needs no
+ * click, so it can auto-load from a `?folder=` query param. Same-origin URLs,
+ * so textures load by URL like a remote host (no reference files needed).
+ */
+export class ServedFolderSource implements AssetSource {
+  readonly label: string;
+  private readonly base: string;
+  private readonly files: readonly string[];
+
+  private constructor(absPath: string, files: readonly string[]) {
+    const clean = absPath.replace(/\/+$/, "");
+    this.label = clean;
+    this.base = `/@local${clean.split("/").map(encodeURIComponent).join("/")}/`;
+    this.files = files;
+  }
+
+  static async fromPath(absPath: string): Promise<ServedFolderSource> {
+    const res = await fetch(`/@list?dir=${encodeURIComponent(absPath)}`);
+    if (!res.ok) throw new Error(`Cannot read folder ${absPath}`);
+    return new ServedFolderSource(absPath, (await res.json()) as string[]);
+  }
+
+  text(path: string): Promise<string> {
+    return request(this.base + encodeURI(path));
+  }
+
+  url(path: string): string {
+    return this.base + encodeURI(path);
+  }
+
+  list(extension: string): string[] {
+    const ext = extension.toLowerCase();
+    return this.files.filter((f) => f.toLowerCase().endsWith(ext)).sort();
   }
 
   async textureFiles(): Promise<undefined> {
@@ -107,6 +158,11 @@ export class LocalAssetSource implements AssetSource {
     const objectUrl = URL.createObjectURL(file);
     this.urls.set(key, objectUrl);
     return objectUrl;
+  }
+
+  list(extension: string): string[] {
+    const ext = extension.toLowerCase();
+    return [...this.files.keys()].filter((rel) => rel.endsWith(ext)).sort();
   }
 
   textureFiles(): Promise<readonly IArrayBufferFile[]> {

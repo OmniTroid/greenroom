@@ -1,6 +1,6 @@
 import "./index.css";
 import { loadCharacter, type CharacterConfig, type EmoteEntry, type EmoteState } from "./character";
-import { RemoteAssetSource, LocalAssetSource, type AssetSource } from "./assets";
+import { RemoteAssetSource, LocalAssetSource, ServedFolderSource, type AssetSource } from "./assets";
 import { createRenderer, type CharacterRenderer } from "./renderers";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -10,6 +10,7 @@ const charInput = $<HTMLInputElement>("char");
 const loadBtn = $<HTMLButtonElement>("load");
 const pickDirBtn = $<HTMLButtonElement>("pickdir");
 const emotesEl = $<HTMLDivElement>("emotes");
+const animationsEl = $<HTMLDivElement>("animations");
 const statusEl = $<HTMLDivElement>("status");
 const stage = $<HTMLDivElement>("stage");
 const rawInput = $<HTMLInputElement>("raw");
@@ -83,11 +84,44 @@ const renderEmotes = (emotes: EmoteEntry[]): void => {
     btn.textContent = emote.desc || emote.emote;
     btn.title = `emote: ${emote.emote}${emote.preanim ? ` · preanim: ${emote.preanim}` : ""}`;
     btn.addEventListener("click", () => {
+      clearActive(animationsEl);
       for (const b of emotesEl.querySelectorAll("button")) b.classList.remove("active");
       btn.classList.add("active");
       void applyEmote(emote);
     });
     emotesEl.appendChild(btn);
+  }
+};
+
+const clearActive = (el: HTMLElement): void => {
+  for (const b of el.querySelectorAll("button")) b.classList.remove("active");
+};
+
+// Lists the folder's raw .vmd files (local folders only) as loadable buttons,
+// alongside the char.ini emotes. Plays through the renderer's playRaw.
+const renderAnimations = (source: AssetSource): void => {
+  const vmds = source.list(".vmd");
+  animationsEl.innerHTML = "";
+  if (vmds === null) {
+    animationsEl.innerHTML = '<span class="hint">Open a local folder to list its .vmd files.</span>';
+    return;
+  }
+  if (vmds.length === 0) {
+    animationsEl.innerHTML = '<span class="hint">No .vmd files in this folder.</span>';
+    return;
+  }
+  for (const rel of vmds) {
+    const base = rel.slice(0, -".vmd".length);
+    const btn = document.createElement("button");
+    btn.textContent = base;
+    btn.title = rel;
+    btn.addEventListener("click", () => {
+      clearActive(emotesEl);
+      clearActive(animationsEl);
+      btn.classList.add("active");
+      void playAnimation(base);
+    });
+    animationsEl.appendChild(btn);
   }
 };
 
@@ -97,6 +131,18 @@ const applyEmote = async (emote: EmoteEntry): Promise<void> => {
   setStatus(`${character.name} · ${emote.emote} · ${state}…`);
   await renderer.setEmote(emote, state);
   setStatus(`${character.name} · ${emote.emote} · ${state}`);
+};
+
+const playAnimation = async (base: string): Promise<void> => {
+  if (!character) return;
+  if (!renderer?.playRaw) {
+    setStatus("This renderer can't play raw animation files.");
+    return;
+  }
+  currentEmote = null;
+  setStatus(`${character.name} · ${base}…`);
+  await renderer.playRaw(base);
+  setStatus(`${character.name} · ${base}`);
 };
 
 const load = async (source: AssetSource, name: string): Promise<void> => {
@@ -112,6 +158,7 @@ const load = async (source: AssetSource, name: string): Promise<void> => {
   renderer = await createRenderer(character);
   renderer.mount(stage);
   renderEmotes(character.emotes);
+  renderAnimations(source);
 
   const kind = character.is3d ? `3D (${character.model})` : "2D sprites";
   const first = character.emotes[0];
@@ -125,6 +172,20 @@ const load = async (source: AssetSource, name: string): Promise<void> => {
 };
 
 const boot = async (): Promise<void> => {
+  const folder = (params.get("folder") ?? "").trim();
+  if (folder) {
+    setStatus(`Reading ${folder}…`);
+    let source: ServedFolderSource;
+    try {
+      source = await ServedFolderSource.fromPath(folder);
+    } catch {
+      setStatus(`Could not read folder ${folder}.`);
+      return;
+    }
+    await load(source, folder.replace(/\/+$/, "").split("/").pop() || folder);
+    return;
+  }
+
   const name = (params.get("char") ?? "").trim();
   if (!name) {
     setStatus("Enter a host + character then Load, or open a local folder.");

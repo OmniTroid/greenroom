@@ -12,9 +12,14 @@ bun run dev
 
 Put a character folder in `assets/characters/<name>/`, then open
 `http://localhost:3000/?char=<name>`. To preview against a remote server
-instead, pass `?asset=<host>` (needs CORS for 3D binary assets). Or click
-"Open folder…" and pick a character folder off your disk (Chromium-based
-browsers; no CORS, and 3D textures load straight from the folder).
+instead, pass `?asset=<host>` (needs CORS for 3D binary assets).
+
+To load a folder off your disk, either click "Open folder…" and pick it
+(Chromium-based browsers), or pass its absolute path so it loads on startup:
+`?folder=/absolute/path/to/character`. The `?folder=` route is served by the
+dev server reading that path directly, so it also lists the folder's `.vmd`
+files as loadable buttons. Both local routes skip CORS and load 3D textures
+straight from the folder.
 
 ## How it works
 
