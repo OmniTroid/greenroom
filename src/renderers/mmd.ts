@@ -54,6 +54,13 @@ const VOWEL_SPECS: { patterns: string[]; open: number }[] = [
 const VOWEL_HOLD_SECONDS = 0.22;
 const TALK_FADE_RATE = 12;
 
+// VMD candidates for an animation reference. A block-format `anim` already
+// carries its extension (used as-is); a legacy stem gets `.vmd`, with the
+// `(a)`-prefixed name some packs use as a fallback.
+const HAS_EXTENSION = /\.[^.\s]+$/;
+const vmdCandidates = (name: string): string[] =>
+  HAS_EXTENSION.test(name) ? [name] : [`${name}.vmd`, `(a)${name}.vmd`];
+
 /** Prefers an exact match (so "い" doesn't grab "笑い"), then substring. */
 function resolveVowels(morphNames: string[]): Vowel[] {
   const vowels: Vowel[] = [];
@@ -183,12 +190,12 @@ export class MmdRenderer implements CharacterRenderer {
     const model = await this.ensureModel();
     if (!model) return;
 
-    const baseCandidates = [`${emote.emote}.vmd`, `(a)${emote.emote}.vmd`];
+    const baseCandidates = vmdCandidates(emote.emote);
 
     if (state === "preanim") {
       this.stopTalk();
-      const preanimRel = emote.preanim ? `${emote.preanim}.vmd` : null;
-      const handle = await this.resolveHandle(model, preanimRel ? [preanimRel] : baseCandidates);
+      const preanim = emote.preanim ? vmdCandidates(emote.preanim) : null;
+      const handle = await this.resolveHandle(model, preanim ?? baseCandidates);
       if (handle) this.playHandle(model, handle, false);
       return;
     }
@@ -199,11 +206,11 @@ export class MmdRenderer implements CharacterRenderer {
     else this.stopTalk();
   }
 
-  /** Plays an arbitrary VMD (by base name, without extension) on the model. */
+  /** Plays an arbitrary VMD by name (with or without a `.vmd` extension). */
   async playRaw(baseName: string): Promise<void> {
     const model = await this.ensureModel();
     if (!model) return;
-    const handle = await this.resolveHandle(model, [`${baseName}.vmd`]);
+    const handle = await this.resolveHandle(model, vmdCandidates(baseName));
     if (handle) this.playHandle(model, handle, true);
   }
 

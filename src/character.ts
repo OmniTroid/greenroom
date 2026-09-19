@@ -43,11 +43,14 @@ export async function loadCharacter(source: AssetSource, name: string): Promise<
   const charIni = parseCharIni(await source.text("char.ini"));
 
   const model = (charIni.options.model ?? "").trim().toLowerCase();
+  // aolib-ts normalizes both encodings: `[emote]` blocks give `anim`/`preanim`
+  // as full filenames with extension; legacy banks give bare stems and a null
+  // preanim for "-". Renderers accept either (see the mmd renderer).
   const emotes: EmoteEntry[] = charIni.emotes.map((e) => ({
     id: e.id,
     desc: e.name,
     emote: e.anim.toLowerCase(),
-    preanim: e.preanim && e.preanim !== "-" ? e.preanim.toLowerCase() : null,
+    preanim: e.preanim ? e.preanim.toLowerCase() : null,
   }));
 
   return {
