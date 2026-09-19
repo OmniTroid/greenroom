@@ -145,9 +145,12 @@ export class MmdRenderer implements CharacterRenderer {
   }
 
   private async initRuntime(): Promise<void> {
-    // The bundler points Ammo's wasm at a blocked file:// URL; the dev server
-    // serves it here (see server.ts) so the fetch is same-origin HTTP.
-    const ammoInstance = await ammoPhysics({ locateFile: () => "/vendor/ammo.wasm.wasm" });
+    // Ammo's wasm streaming path hardcodes a fetch against its own module URL,
+    // which the bundler resolves to a blocked file:// path (locateFile is
+    // ignored on that path). Hand it the bytes from the dev server (see
+    // server.ts) as wasmBinary so it skips fetching entirely.
+    const wasmBinary = await (await fetch("/vendor/ammo.wasm.wasm")).arrayBuffer();
+    const ammoInstance = await ammoPhysics({ wasmBinary });
     const plugin = new MmdAmmoJSPlugin(true, ammoInstance);
     this.scene.enablePhysics(new Vector3(0, -98, 0), plugin);
     this.runtime = new MmdRuntime(this.scene, new MmdAmmoPhysics(this.scene));
