@@ -43,12 +43,17 @@ interface LoadedModel {
   radius: number;
 }
 
-// One queued clip: its runtime animation on the model and on the MMD camera,
-// plus whether the source VMD actually carries a camera track.
+// One queued clip: its runtime animation on the model, and the MMD-camera
+// runtime animation from the emote's separate camera VMD (null when it has none).
 interface Step {
   model: MmdRuntimeAnimationHandle;
-  camera: MmdRuntimeAnimationHandle;
-  hasCamera: boolean;
+  camera: MmdRuntimeAnimationHandle | null;
+}
+
+// A clip to play: the motion VMD name, plus an optional separate camera VMD.
+interface ClipSpec {
+  name: string;
+  camera: string | null;
 }
 
 // Mouth shapes. Talking cycles these vowel morphs with an open/close envelope
@@ -91,10 +96,10 @@ function resolveVowels(morphNames: string[]): Vowel[] {
 }
 
 /**
- * Renders an MMD (.pmx/.vmd) character. idle and talking share one mouth-free
- * base motion (`<emote>.vmd`); talking layers vowel morphs on top. preanim
- * plays `<preanim>.vmd` once. Binary model/motion data needs a CORS-enabled
- * host (unlike 2D sprites).
+ * Renders an MMD (.pmx/.vmd) character. The "anim" phase loops the mouth-free
+ * base motion (`<emote>.vmd`); "preanim"/"postanim" play those clips once.
+ * Talking (independent of phase) layers vowel morphs on top. Binary model/motion
+ * data needs a CORS-enabled host (unlike 2D sprites).
  */
 export class MmdRenderer implements CharacterRenderer {
   private canvas: HTMLCanvasElement;
@@ -231,31 +236,39 @@ export class MmdRenderer implements CharacterRenderer {
     const model = await this.ensureModel();
     if (!model) return;
 
-    // The "preanim" phase is a one-shot preview of this emote's intro; it does
-    // not loop the emote, so a following idle/talking re-enters from scratch.
-    if (state === "preanim") {
-      this.stopTalk();
-      const steps = await this.resolveSteps(model, [emote.preanim ?? emote.emote]);
+    // Preanim/Postanim: play that single clip once (a stateless action).
+    if (state === "preanim" || state === "postanim") {
+      const clip = state === "preanim" ? emote.preanim : emote.postanim;
+      const steps = await this.resolveSteps(model, [{ name: clip ?? emote.emote, camera: null }]);
       if (steps.length) this.playSteps(model, steps, false);
-      // Not looping an emote anymore, so idle/talking next re-enters cleanly.
       this.playingEmote = null;
       return;
     }
 
-    // Toggling idle <-> talking on the same emote keeps the running loop; only
-    // an emote change rebuilds the transition sequence.
-    const prev = this.playingEmote;
-    if (!prev || prev.id !== emote.id) {
-      const names: string[] = [];
-      if (prev?.postanim) names.push(prev.postanim); // outro of the emote we leave
-      if (emote.preanim) names.push(emote.preanim); // intro of the emote we enter
-      names.push(emote.emote); // the loop
-      const steps = await this.resolveSteps(model, names);
+    // "anim": loop just this emote's anim (+ its camera), no transition.
+    if (state === "anim") {
+      const steps = await this.resolveSteps(model, [{ name: emote.emote, camera: emote.camera }]);
       if (steps.length) this.playSteps(model, steps, true);
       this.playingEmote = emote;
+      return;
     }
 
-    if (state === "talking") this.startTalk();
+    // "auto" (emote selected): re-selecting the same emote keeps the running
+    // loop; a change chains [prev postanim] -> [new preanim] -> loop(new anim).
+    const prev = this.playingEmote;
+    if (prev && prev.id === emote.id) return;
+    const specs: ClipSpec[] = [];
+    if (prev?.postanim) specs.push({ name: prev.postanim, camera: null }); // outro of the emote we leave
+    if (emote.preanim) specs.push({ name: emote.preanim, camera: null }); // intro of the emote we enter
+    specs.push({ name: emote.emote, camera: emote.camera }); // the loop, with its camera VMD
+    const steps = await this.resolveSteps(model, specs);
+    if (steps.length) this.playSteps(model, steps, true);
+    this.playingEmote = emote;
+  }
+
+  /** Talking is orthogonal to the phase: mouth morphs layered over the motion. */
+  setTalking(on: boolean): void {
+    if (on) this.startTalk();
     else this.stopTalk();
   }
 
@@ -263,7 +276,7 @@ export class MmdRenderer implements CharacterRenderer {
   async playRaw(baseName: string): Promise<void> {
     const model = await this.ensureModel();
     if (!model) return;
-    const steps = await this.resolveSteps(model, [baseName]);
+    const steps = await this.resolveSteps(model, [{ name: baseName, camera: null }]);
     if (steps.length) this.playSteps(model, steps, true);
     // A raw clip leaves no emote to transition out of.
     this.playingEmote = null;
@@ -337,10 +350,10 @@ export class MmdRenderer implements CharacterRenderer {
   }
 
   /** Resolve clip names to steps in order, skipping any that don't load. */
-  private async resolveSteps(model: LoadedModel, names: string[]): Promise<Step[]> {
+  private async resolveSteps(model: LoadedModel, specs: ClipSpec[]): Promise<Step[]> {
     const steps: Step[] = [];
-    for (const name of names) {
-      const step = await this.resolveStep(model, vmdCandidates(name));
+    for (const spec of specs) {
+      const step = await this.resolveStep(model, spec);
       if (step) steps.push(step);
     }
     return steps;
@@ -369,13 +382,13 @@ export class MmdRenderer implements CharacterRenderer {
     const step = this.steps[this.stepIndex];
     model.mmdModel.setRuntimeAnimation(step.model);
     model.playing = step.model;
-    this.mmdCamera.setRuntimeAnimation(step.camera);
+    this.mmdCamera.setRuntimeAnimation(step.camera); // null clears any camera anim
     this.runtime.seekAnimation(0, true);
     void this.runtime.playAnimation();
-    this.updateActiveCamera(step.hasCamera);
+    this.updateActiveCamera(step.camera !== null);
   }
 
-  /** Switch to the MMD camera only while tracking and the clip has camera data. */
+  /** Switch to the MMD camera only while tracking and the clip has a camera VMD. */
   private updateActiveCamera(clipHasCamera: boolean): void {
     if (this.trackCamera && clipHasCamera) {
       if (this.scene.activeCamera !== this.mmdCamera) {
@@ -390,7 +403,7 @@ export class MmdRenderer implements CharacterRenderer {
 
   setCameraTracking(on: boolean): void {
     this.trackCamera = on;
-    this.updateActiveCamera(this.steps[this.stepIndex]?.hasCamera ?? false);
+    this.updateActiveCamera(this.steps[this.stepIndex]?.camera != null);
   }
 
   private startTalk(): void {
@@ -429,25 +442,37 @@ export class MmdRenderer implements CharacterRenderer {
     }
   }
 
-  /** First loadable candidate as a Step: model + camera runtime animations. */
-  private async resolveStep(model: LoadedModel, candidates: string[]): Promise<Step | null> {
-    for (const rel of candidates) {
+  /** Resolve a clip to a Step: its model animation, plus a camera animation
+   * from the spec's separate camera VMD (null when absent or camera-less). */
+  private async resolveStep(model: LoadedModel, spec: ClipSpec): Promise<Step | null> {
+    let modelHandle: MmdRuntimeAnimationHandle | null = null;
+    for (const rel of vmdCandidates(spec.name)) {
       const url = this.char.source.url(rel);
       if (!url) continue;
       const anim = await this.loadMotion(url);
       if (!anim) continue;
+      modelHandle = model.handles.get(url) ?? model.mmdModel.createRuntimeAnimation(anim);
+      model.handles.set(url, modelHandle);
+      break;
+    }
+    if (!modelHandle) return null;
 
-      let modelHandle = model.handles.get(url);
-      if (!modelHandle) {
-        modelHandle = model.mmdModel.createRuntimeAnimation(anim);
-        model.handles.set(url, modelHandle);
-      }
-      let cameraHandle = this.cameraHandles.get(url);
-      if (!cameraHandle) {
-        cameraHandle = this.mmdCamera.createRuntimeAnimation(anim);
-        this.cameraHandles.set(url, cameraHandle);
-      }
-      return { model: modelHandle, camera: cameraHandle, hasCamera: anim.cameraTrack.frameNumbers.length > 0 };
+    const camera = spec.camera ? await this.resolveCameraHandle(spec.camera) : null;
+    return { model: modelHandle, camera };
+  }
+
+  /** Camera runtime animation from a camera VMD, or null if it has no camera track. */
+  private async resolveCameraHandle(name: string): Promise<MmdRuntimeAnimationHandle | null> {
+    for (const rel of vmdCandidates(name)) {
+      const url = this.char.source.url(rel);
+      if (!url) continue;
+      const cached = this.cameraHandles.get(url);
+      if (cached) return cached;
+      const anim = await this.loadMotion(url);
+      if (!anim || anim.cameraTrack.frameNumbers.length === 0) continue;
+      const handle = this.mmdCamera.createRuntimeAnimation(anim);
+      this.cameraHandles.set(url, handle);
+      return handle;
     }
     return null;
   }

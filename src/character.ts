@@ -1,8 +1,13 @@
 import { parseCharIni, type CharIni } from "aolib-ts";
 import type { AssetSource } from "./assets";
 
-/** Animation phase a character can be shown in. Applies to 2D and 3D alike. */
-export type EmoteState = "idle" | "talking" | "preanim";
+/**
+ * Animation phase to show an emote in. `auto` is natural playback: switching
+ * emotes chains the old emote's postanim, the new one's preanim, then loops its
+ * anim. `anim` loops just the anim; `preanim`/`postanim` play that clip once.
+ * Talking (mouth) is orthogonal to all of these.
+ */
+export type EmoteState = "auto" | "preanim" | "anim" | "postanim";
 
 export interface EmoteEntry {
   /** 1-based index from char.ini [emotions]. */
@@ -15,6 +20,8 @@ export interface EmoteEntry {
   preanim: string | null;
   /** Post-animation (outro), played once when leaving this emote, or null. */
   postanim: string | null;
+  /** Separate camera VMD driving the view during this emote, or null. */
+  camera: string | null;
 }
 
 /**
@@ -48,19 +55,24 @@ export async function loadCharacter(source: AssetSource, name: string): Promise<
   // aolib-ts normalizes both encodings: `[emote]` blocks give `anim`/`preanim`
   // as full filenames with extension; legacy banks give bare stems and a null
   // preanim for "-". Renderers accept either (see the mmd renderer).
-  // `postanim` isn't modeled by aolib-ts yet, so read it from the raw block
-  // section (its sanctioned escape hatch); legacy emotes have no block, so null.
+  // `postanim`/`camera` aren't modeled by aolib-ts yet, so read them from the
+  // raw block section (its sanctioned escape hatch); legacy emotes have no
+  // block, so null.
   const norm = (v: string | undefined): string | null => {
     const s = v?.trim();
     return s && s !== "-" ? s.toLowerCase() : null;
   };
-  const emotes: EmoteEntry[] = charIni.emotes.map((e) => ({
-    id: e.id,
-    desc: e.name,
-    emote: e.anim.toLowerCase(),
-    preanim: e.preanim ? e.preanim.toLowerCase() : null,
-    postanim: norm(charIni.sections[`emote ${e.key.toLowerCase()}`]?.postanim),
-  }));
+  const emotes: EmoteEntry[] = charIni.emotes.map((e, i) => {
+    const block = charIni.sections[`emote ${e.key.toLowerCase()}`];
+    return {
+      id: i + 1,
+      desc: e.name,
+      emote: e.anim.toLowerCase(),
+      preanim: e.preanim ? e.preanim.toLowerCase() : null,
+      postanim: norm(block?.postanim),
+      camera: norm(block?.camera),
+    };
+  });
 
   return {
     name,

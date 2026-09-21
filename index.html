@@ -21,38 +21,26 @@
         <div class="row" style="margin-top: 10px;">
           <button id="load" class="primary">Load from URL</button>
         </div>
-        <div class="hint">
-          Full URL to the folder holding char.ini. Binary 3D assets need a
-          CORS-enabled host.
-        </div>
 
         <h2>Load char from local dir</h2>
         <div class="row">
           <button id="pickdir" class="primary">Open folder…</button>
         </div>
-        <div class="hint">
-          Pick a character folder off your disk (Chromium browsers): no CORS,
-          textures included. Or pass <code>?folder=/absolute/path</code> in the
-          URL to load one on startup.
-        </div>
-
-        <h2>Animation phase</h2>
-        <div id="states">
-          <button data-state="idle" class="active">Idle</button>
-          <button data-state="talking">Talking</button>
-          <button data-state="preanim">Preanim</button>
-        </div>
-        <div class="hint">3D talking layers mouth morphs over the idle motion.</div>
-
-        <h2>Camera</h2>
-        <label class="check"><input id="trackcam" type="checkbox" /> Track baked camera (VMD)</label>
-        <div class="hint">
-          Follow camera motion baked into the emote's VMD; falls back to the
-          orbit camera on clips with no camera track. 3D only.
-        </div>
 
         <h2>Emotes</h2>
         <div id="emotes"><span class="hint">Load a character to list emotes.</span></div>
+
+        <label class="check"><input id="talking" type="checkbox" /> Talking</label>
+
+        <h2>Animation phase</h2>
+        <div id="states">
+          <button data-state="preanim">Preanim</button>
+          <button data-state="anim">Anim</button>
+          <button data-state="postanim">Postanim</button>
+        </div>
+
+        <h2>Camera</h2>
+        <label class="check"><input id="trackcam" type="checkbox" checked /> Track emote camera (VMD)</label>
 
         <h2>Animations in folder</h2>
         <div id="animations"><span class="hint">Open a local folder to list its .vmd files.</span></div>

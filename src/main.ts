@@ -16,10 +16,12 @@ const rawInput = $<HTMLInputElement>("raw");
 const playRawBtn = $<HTMLButtonElement>("playraw");
 const stateButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("#states button"));
 const trackCamBtn = $<HTMLInputElement>("trackcam");
+const talkingBtn = $<HTMLInputElement>("talking");
 
 const setStatus = (msg: string) => (statusEl.textContent = msg);
 
 trackCamBtn.addEventListener("change", () => renderer?.setCameraTracking?.(trackCamBtn.checked));
+talkingBtn.addEventListener("change", () => renderer?.setTalking?.(talkingBtn.checked));
 
 const params = new URLSearchParams(location.search);
 urlInput.value = params.get("url") ?? "";
@@ -37,7 +39,6 @@ const nameFromUrl = (u: string): string => {
 let renderer: CharacterRenderer | null = null;
 let character: CharacterConfig | null = null;
 let currentEmote: EmoteEntry | null = null;
-let state: EmoteState = "idle";
 
 loadBtn.addEventListener("click", () => {
   const p = new URLSearchParams();
@@ -64,11 +65,13 @@ pickDirBtn.addEventListener("click", async () => {
   await load(source, dir.name);
 });
 
+// Phase buttons are stateless: each just plays that clip of the current emote.
 for (const btn of stateButtons) {
   btn.addEventListener("click", () => {
-    state = btn.dataset.state as EmoteState;
-    for (const b of stateButtons) b.classList.toggle("active", b === btn);
-    if (renderer && currentEmote) void applyEmote(currentEmote);
+    if (!renderer || !character || !currentEmote) return;
+    const phase = btn.dataset.state as EmoteState;
+    setStatus(`${character.name} · ${currentEmote.emote} · ${phase}…`);
+    void renderer.setEmote(currentEmote, phase);
   });
 }
 
@@ -132,12 +135,14 @@ const renderAnimations = (source: AssetSource): void => {
   }
 };
 
+// Selecting an emote is the "auto" phase: the renderer transitions from the
+// previous emote (its postanim, then this emote's preanim) into the loop.
 const applyEmote = async (emote: EmoteEntry): Promise<void> => {
   if (!renderer || !character) return;
   currentEmote = emote;
-  setStatus(`${character.name} · ${emote.emote} · ${state}…`);
-  await renderer.setEmote(emote, state);
-  setStatus(`${character.name} · ${emote.emote} · ${state}`);
+  setStatus(`${character.name} · ${emote.emote}…`);
+  await renderer.setEmote(emote, "auto");
+  setStatus(`${character.name} · ${emote.emote}`);
 };
 
 const playAnimation = async (base: string): Promise<void> => {
@@ -167,6 +172,7 @@ const load = async (source: AssetSource, name: string): Promise<void> => {
   renderEmotes(character.emotes);
   renderAnimations(source);
 
+  renderer.setTalking?.(talkingBtn.checked);
   // Baked-camera tracking is 3D-only; disable the toggle when unsupported.
   trackCamBtn.disabled = typeof renderer.setCameraTracking !== "function";
   renderer.setCameraTracking?.(trackCamBtn.checked);
@@ -176,7 +182,7 @@ const load = async (source: AssetSource, name: string): Promise<void> => {
   if (first) {
     emotesEl.querySelector("button")?.classList.add("active");
     await applyEmote(first);
-    setStatus(`${character.name} · ${kind} · ${first.emote} · ${state}`);
+    setStatus(`${character.name} · ${kind} · ${first.emote}`);
   } else {
     setStatus(`${character.name} · ${kind} · no emotes`);
   }

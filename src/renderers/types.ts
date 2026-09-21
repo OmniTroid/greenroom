@@ -21,6 +21,9 @@ export interface CharacterRenderer {
    */
   playRaw?(baseName: string): Promise<void>;
 
+  /** Toggle talking (mouth movement). Orthogonal to the animation phase. */
+  setTalking?(on: boolean): void;
+
   /**
    * Drive the view from the animation's baked camera track instead of the
    * default camera. 3D only; absent on renderers without a baked camera.

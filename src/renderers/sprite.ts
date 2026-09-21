@@ -8,14 +8,16 @@ const TRANSPARENT =
 
 /**
  * Renders a 2D (sprite) AO character as a swapping <img>, mirroring the client's
- * emote resolution: idle = `(a)<emote>`, talking = `(b)<emote>`, preanim =
- * `<preanim>` (no prefix), across the usual animated extensions. A basic
- * preview today; the shared CharacterRenderer interface lets it grow (blips,
- * timed preanim -> idle, pairing) without the tool changing.
+ * emote resolution: anim = `(a)<emote>` (or `(b)<emote>` while talking), preanim
+ * = `<preanim>`, postanim = `<postanim>` (no prefix), across the usual animated
+ * extensions. A basic preview today; the shared CharacterRenderer interface lets
+ * it grow (blips, timed preanim -> anim, pairing) without the tool changing.
  */
 export class SpriteRenderer implements CharacterRenderer {
   private img: HTMLImageElement;
   private token = 0;
+  private talking = false;
+  private current: { emote: EmoteEntry; state: EmoteState } | null = null;
 
   constructor(private char: CharacterConfig) {
     this.img = new Image();
@@ -29,8 +31,23 @@ export class SpriteRenderer implements CharacterRenderer {
   }
 
   async setEmote(emote: EmoteEntry, state: EmoteState): Promise<void> {
-    const prefix = state === "talking" ? "(b)" : state === "idle" ? "(a)" : "";
-    const name = state === "preanim" && emote.preanim ? emote.preanim : emote.emote;
+    this.current = { emote, state };
+    await this.render();
+  }
+
+  setTalking(on: boolean): void {
+    this.talking = on;
+    if (this.current) void this.render();
+  }
+
+  private async render(): Promise<void> {
+    if (!this.current) return;
+    const { emote, state } = this.current;
+    let prefix = "";
+    let name = emote.emote;
+    if (state === "anim" || state === "auto") prefix = this.talking ? "(b)" : "(a)";
+    else if (state === "preanim") name = emote.preanim ?? emote.emote;
+    else name = emote.postanim ?? emote.emote;
     const url = await this.resolve(prefix, name);
     // Guard against out-of-order resolution when the user clicks quickly.
     const mine = ++this.token;
