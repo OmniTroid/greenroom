@@ -10,9 +10,11 @@ bun install
 bun run dev
 ```
 
-Put a character folder in `assets/characters/<name>/`, then open
-`http://localhost:3000/?char=<name>`. To preview against a remote server
-instead, pass `?asset=<host>` (needs CORS for 3D binary assets).
+Load a character two ways. **From a URL:** the full URL to the folder holding
+its `char.ini`, e.g. `?url=https://host/base/characters/Fenomeno3D/` (a remote
+host needs CORS for 3D binary assets). A character dropped in
+`assets/characters/<name>/` is served by the dev server, so
+`?url=http://localhost:3000/characters/<name>/` works.
 
 To load a folder off your disk, either click "Open folder…" and pick it
 (Chromium-based browsers), or pass its absolute path so it loads on startup:

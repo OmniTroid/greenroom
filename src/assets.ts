@@ -29,15 +29,17 @@ export interface AssetSource {
 const withTrailingSlash = (host: string): string =>
   host && !host.endsWith("/") ? `${host}/` : host;
 
-/** Serves a character from a remote AO asset host over HTTP. */
+/**
+ * Serves a character from a remote URL: the full URL to the folder holding
+ * char.ini (e.g. `https://host/base/characters/Fenomeno3D/`).
+ */
 export class RemoteAssetSource implements AssetSource {
   readonly label: string;
   private readonly base: string;
 
-  constructor(rawHost: string, name: string) {
-    const host = withTrailingSlash(rawHost.trim());
-    this.label = host;
-    this.base = `${host}characters/${encodeURI(name.toLowerCase())}/`;
+  constructor(folderUrl: string) {
+    this.base = withTrailingSlash(folderUrl.trim());
+    this.label = this.base;
   }
 
   text(path: string): Promise<string> {

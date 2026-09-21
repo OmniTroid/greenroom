@@ -15,19 +15,25 @@
       <div id="panel">
         <h1>Green Room</h1>
 
-        <label for="host">Asset host</label>
-        <input id="host" type="text" placeholder="https://example.com/base/" />
-        <label for="char">Character folder</label>
-        <input id="char" type="text" placeholder="Fenomeno3D" />
+        <h2>Load char from URL</h2>
+        <label for="url">Character folder URL</label>
+        <input id="url" type="text" placeholder="https://host/base/characters/MyCharacter/" />
         <div class="row" style="margin-top: 10px;">
-          <button id="load" class="primary">Load character</button>
-          <button id="pickdir">Open folder…</button>
+          <button id="load" class="primary">Load from URL</button>
         </div>
         <div class="hint">
-          Reads char.ini. 3D if it has <code>[options] model = &lt;file&gt;.pmx</code>,
-          otherwise 2D sprites. Binary 3D assets from a host need CORS; "Open
-          folder…" loads a character folder off your disk instead (no CORS,
-          textures included).
+          Full URL to the folder holding char.ini. Binary 3D assets need a
+          CORS-enabled host.
+        </div>
+
+        <h2>Load char from local dir</h2>
+        <div class="row">
+          <button id="pickdir" class="primary">Open folder…</button>
+        </div>
+        <div class="hint">
+          Pick a character folder off your disk (Chromium browsers): no CORS,
+          textures included. Or pass <code>?folder=/absolute/path</code> in the
+          URL to load one on startup.
         </div>
 
         <h2>Animation phase</h2>
@@ -52,7 +58,7 @@
         </div>
       </div>
     </div>
-    <div id="status">Enter a host + character, then Load.</div>
+    <div id="status">Load a character from a URL or a local folder.</div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

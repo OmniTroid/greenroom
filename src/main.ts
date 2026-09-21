@@ -5,8 +5,7 @@ import { createRenderer, type CharacterRenderer } from "./renderers";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const hostInput = $<HTMLInputElement>("host");
-const charInput = $<HTMLInputElement>("char");
+const urlInput = $<HTMLInputElement>("url");
 const loadBtn = $<HTMLButtonElement>("load");
 const pickDirBtn = $<HTMLButtonElement>("pickdir");
 const emotesEl = $<HTMLDivElement>("emotes");
@@ -20,11 +19,17 @@ const stateButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("#s
 const setStatus = (msg: string) => (statusEl.textContent = msg);
 
 const params = new URLSearchParams(location.search);
-// Default to this server's own origin, so dropping a character in ./assets and
-// typing its name just works with no host to configure.
-const defaultHost = `${location.origin}/`;
-hostInput.value = params.get("asset") ?? defaultHost;
-charInput.value = params.get("char") ?? "";
+urlInput.value = params.get("url") ?? "";
+
+// Character name from a folder URL: its last path segment.
+const nameFromUrl = (u: string): string => {
+  try {
+    const path = new URL(u, location.href).pathname.replace(/\/+$/, "");
+    return decodeURIComponent(path.split("/").pop() || "") || u;
+  } catch {
+    return u;
+  }
+};
 
 let renderer: CharacterRenderer | null = null;
 let character: CharacterConfig | null = null;
@@ -33,11 +38,10 @@ let state: EmoteState = "idle";
 
 loadBtn.addEventListener("click", () => {
   const p = new URLSearchParams();
-  if (hostInput.value) p.set("asset", hostInput.value.trim());
-  if (charInput.value) p.set("char", charInput.value.trim());
+  if (urlInput.value.trim()) p.set("url", urlInput.value.trim());
   location.search = p.toString();
 });
-charInput.addEventListener("keydown", (e) => {
+urlInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") loadBtn.click();
 });
 
@@ -186,12 +190,12 @@ const boot = async (): Promise<void> => {
     return;
   }
 
-  const name = (params.get("char") ?? "").trim();
-  if (!name) {
-    setStatus("Enter a host + character then Load, or open a local folder.");
+  const url = (params.get("url") ?? "").trim();
+  if (!url) {
+    setStatus("Load a character from a URL or a local folder.");
     return;
   }
-  await load(new RemoteAssetSource(hostInput.value.trim(), name), name);
+  await load(new RemoteAssetSource(url), nameFromUrl(url));
 };
 
 void boot();
