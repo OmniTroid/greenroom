@@ -19,8 +19,8 @@ const LOCAL = "/@local";
 // straight off an absolute local path via /@local + a /@list directory index.
 const server = Bun.serve({
   port: PORT,
-  // Full page reload on change, not HMR: the WebGL/physics renderer holds
-  // imperative state that can't be hot-swapped in place.
+  // Full page reload on change, not HMR: the WebGL renderer holds imperative
+  // state that can't be hot-swapped in place.
   development: { hmr: false },
   routes: {
     "/": index,
@@ -38,15 +38,6 @@ const server = Bun.serve({
       } catch {
         return new Response("Not found", { status: 404 });
       }
-    }
-
-    // babylon-mmd's Ammo glue locates its wasm relative to its own module URL,
-    // which the bundler resolves to a blocked file:// path; serve it over HTTP
-    // so the renderer can point Ammo's locateFile here instead.
-    if (pathname === "/vendor/ammo.wasm.wasm") {
-      return new Response(
-        Bun.file("./node_modules/babylon-mmd/esm/Runtime/Physics/External/ammo.wasm.wasm"),
-      );
     }
 
     if (pathname.startsWith(`${LOCAL}/`)) {

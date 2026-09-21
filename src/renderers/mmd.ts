@@ -7,13 +7,9 @@ import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 
-import "@babylonjs/core/Physics/physicsEngineComponent";
 import "babylon-mmd/esm/Loader/pmxLoader";
 import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeModelAnimation";
 import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeCameraAnimation";
-import ammoPhysics from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm";
-import { MmdAmmoJSPlugin } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoJSPlugin";
-import { MmdAmmoPhysics } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoPhysics";
 import { SdefInjector } from "babylon-mmd/esm/Loader/sdefInjector";
 import { MmdStandardMaterialBuilder } from "babylon-mmd/esm/Loader/mmdStandardMaterialBuilder";
 import { MmdMaterialRenderMethod } from "babylon-mmd/esm/Loader/materialBuilderBase";
@@ -109,8 +105,7 @@ export class MmdRenderer implements CharacterRenderer {
   private mmdCamera: MmdCamera; // driven by a VMD's baked camera track
   private trackCamera = false;
   private cameraHandles = new Map<string, MmdRuntimeAnimationHandle>();
-  private runtime!: MmdRuntime;
-  private runtimeReady?: Promise<void>;
+  private runtime: MmdRuntime;
   private materialBuilder: MmdStandardMaterialBuilder;
   private vmdLoader: VmdLoader;
 
@@ -165,44 +160,11 @@ export class MmdRenderer implements CharacterRenderer {
 
     this.vmdLoader = new VmdLoader(this.scene);
     this.scene.onBeforeRenderObservable.add(() => this.updateTalk());
-    // Runs at frame start, before the runtime's own beforePhysics (registered
-    // later in initRuntime), so a queued clip swap applies cleanly from frame 0.
+    // Runs at frame start, before the runtime's beforePhysics (added just
+    // below), so a queued clip swap applies cleanly from frame 0.
     this.scene.onBeforeAnimationsObservable.add(() => this.advancePending());
 
-    this.engine.runRenderLoop(() => this.scene.render());
-    this.onResize = () => this.engine.resize();
-    window.addEventListener("resize", this.onResize);
-  }
-
-  private onResize: () => void;
-
-  // Create the MMD runtime with an Ammo physics world (once) so PMX rigid
-  // bodies and joints (skirt, hair, tail) are simulated. Ammo init is async,
-  // so this is awaited before load.
-  private ensureRuntime(): Promise<void> {
-    if (!this.runtimeReady) this.runtimeReady = this.initRuntime();
-    return this.runtimeReady;
-  }
-
-  private async initRuntime(): Promise<void> {
-    // Ammo always fetches its wasm from new URL(..., import.meta.url), which the
-    // bundler resolves to a blocked file:// path, and its ArrayBuffer fallback
-    // only fires on a compile error, not that fetch rejection. Instantiate the
-    // wasm ourselves (bytes from the dev server, see server.ts) via the
-    // instantiateWasm hook, which short-circuits before any fetch.
-    const wasmBinary = await (await fetch("/vendor/ammo.wasm.wasm")).arrayBuffer();
-    const ammoInstance = await ammoPhysics({
-      instantiateWasm(
-        imports: WebAssembly.Imports,
-        receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
-      ) {
-        WebAssembly.instantiate(wasmBinary, imports).then((r) => receive(r.instance, r.module));
-        return {};
-      },
-    });
-    const plugin = new MmdAmmoJSPlugin(true, ammoInstance);
-    this.scene.enablePhysics(new Vector3(0, -98, 0), plugin);
-    this.runtime = new MmdRuntime(this.scene, new MmdAmmoPhysics(this.scene));
+    this.runtime = new MmdRuntime(this.scene);
     this.runtime.register(this.scene);
     // Drive the MMD camera off the same clock as the model, so its baked camera
     // track stays in sync with the body motion.
@@ -216,8 +178,8 @@ export class MmdRenderer implements CharacterRenderer {
       const atEnd = duration > 0 && this.runtime.currentFrameTime >= duration - 1e-3;
       if (!atEnd) return;
       if (this.stepIndex < this.steps.length - 1) {
-        // Defer the swap: switching handles here (mid-beforePhysics) would flash
-        // the bind pose. advancePending() does it at the next frame start.
+        // Defer the swap: switching handles mid-frame would flash the bind pose.
+        // advancePending() does it at the next frame start.
         this.pendingAdvance = true;
       } else if (this.loopLast) {
         // Looping reuses the same handle (no swap, no reset), so restart inline.
@@ -225,7 +187,13 @@ export class MmdRenderer implements CharacterRenderer {
         void this.runtime.playAnimation();
       }
     });
+
+    this.engine.runRenderLoop(() => this.scene.render());
+    this.onResize = () => this.engine.resize();
+    window.addEventListener("resize", this.onResize);
   }
+
+  private onResize: () => void;
 
   mount(container: HTMLElement): void {
     container.appendChild(this.canvas);
@@ -300,7 +268,6 @@ export class MmdRenderer implements CharacterRenderer {
 
   private async loadModel(): Promise<LoadedModel | null> {
     try {
-      await this.ensureRuntime();
       const url = this.char.source.url(this.char.model ?? "");
       if (!url) {
         console.warn(`Model ${this.char.model} not found for ${this.char.name}`);
@@ -323,7 +290,7 @@ export class MmdRenderer implements CharacterRenderer {
         },
       });
       const mesh = result.meshes[0] as MmdMesh;
-      const mmdModel = this.runtime.createMmdModel(mesh, { buildPhysics: true });
+      const mmdModel = this.runtime.createMmdModel(mesh);
       const { target, radius } = this.frameFromSkeleton(mesh, result.skeletons?.[0]);
       const morphNames = Array.from(
         (mmdModel.morph as unknown as { _morphIndexMap: Map<string, number[]> })._morphIndexMap.keys(),
