@@ -21,6 +21,12 @@ export interface CharacterRenderer {
    */
   playRaw?(baseName: string): Promise<void>;
 
+  /**
+   * Drive the view from the animation's baked camera track instead of the
+   * default camera. 3D only; absent on renderers without a baked camera.
+   */
+  setCameraTracking?(on: boolean): void;
+
   /** Tear down (stop loops, free GPU resources, remove DOM). */
   dispose(): void;
 }

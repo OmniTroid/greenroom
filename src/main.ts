@@ -15,8 +15,11 @@ const stage = $<HTMLDivElement>("stage");
 const rawInput = $<HTMLInputElement>("raw");
 const playRawBtn = $<HTMLButtonElement>("playraw");
 const stateButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("#states button"));
+const trackCamBtn = $<HTMLInputElement>("trackcam");
 
 const setStatus = (msg: string) => (statusEl.textContent = msg);
+
+trackCamBtn.addEventListener("change", () => renderer?.setCameraTracking?.(trackCamBtn.checked));
 
 const params = new URLSearchParams(location.search);
 urlInput.value = params.get("url") ?? "";
@@ -163,6 +166,10 @@ const load = async (source: AssetSource, name: string): Promise<void> => {
   renderer.mount(stage);
   renderEmotes(character.emotes);
   renderAnimations(source);
+
+  // Baked-camera tracking is 3D-only; disable the toggle when unsupported.
+  trackCamBtn.disabled = typeof renderer.setCameraTracking !== "function";
+  renderer.setCameraTracking?.(trackCamBtn.checked);
 
   const kind = character.is3d ? `3D (${character.model})` : "2D sprites";
   const first = character.emotes[0];

@@ -10,6 +10,7 @@ import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import "@babylonjs/core/Physics/physicsEngineComponent";
 import "babylon-mmd/esm/Loader/pmxLoader";
 import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeModelAnimation";
+import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeCameraAnimation";
 import ammoPhysics from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm";
 import { MmdAmmoJSPlugin } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoJSPlugin";
 import { MmdAmmoPhysics } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoPhysics";
@@ -18,6 +19,7 @@ import { MmdStandardMaterialBuilder } from "babylon-mmd/esm/Loader/mmdStandardMa
 import { MmdMaterialRenderMethod } from "babylon-mmd/esm/Loader/materialBuilderBase";
 import { VmdLoader } from "babylon-mmd/esm/Loader/vmdLoader";
 import { MmdRuntime } from "babylon-mmd/esm/Runtime/mmdRuntime";
+import { MmdCamera } from "babylon-mmd/esm/Runtime/mmdCamera";
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
 import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
 import type { MmdAnimation } from "babylon-mmd/esm/Loader/Animation/mmdAnimation";
@@ -39,6 +41,14 @@ interface LoadedModel {
   vowels: Vowel[];
   target: Vector3;
   radius: number;
+}
+
+// One queued clip: its runtime animation on the model and on the MMD camera,
+// plus whether the source VMD actually carries a camera track.
+interface Step {
+  model: MmdRuntimeAnimationHandle;
+  camera: MmdRuntimeAnimationHandle;
+  hasCamera: boolean;
 }
 
 // Mouth shapes. Talking cycles these vowel morphs with an open/close envelope
@@ -90,7 +100,10 @@ export class MmdRenderer implements CharacterRenderer {
   private canvas: HTMLCanvasElement;
   private engine: Engine;
   private scene: Scene;
-  private camera: ArcRotateCamera;
+  private arcCamera: ArcRotateCamera; // orbit camera the viewer controls
+  private mmdCamera: MmdCamera; // driven by a VMD's baked camera track
+  private trackCamera = false;
+  private cameraHandles = new Map<string, MmdRuntimeAnimationHandle>();
   private runtime!: MmdRuntime;
   private runtimeReady?: Promise<void>;
   private materialBuilder: MmdStandardMaterialBuilder;
@@ -100,7 +113,15 @@ export class MmdRenderer implements CharacterRenderer {
   private motions = new Map<string, Promise<MmdAnimation | null>>();
   private active: LoadedModel | null = null;
 
-  private looping = false;
+  // A play queue of one-shot clips; the last loops when `loopLast`. Emote
+  // transitions chain [prev postanim] -> [new preanim] -> loop(new anim) so the
+  // model passes through its base pose instead of snapping between loops.
+  private steps: Step[] = [];
+  private stepIndex = 0;
+  private loopLast = false;
+  private pendingAdvance = false;
+  private playingEmote: EmoteEntry | null = null;
+
   private talking = false;
   private talkTime = 0;
   private talkAmp = 0;
@@ -116,13 +137,17 @@ export class MmdRenderer implements CharacterRenderer {
     this.scene.clearColor = new Color4(0, 0, 0, 0);
     this.scene.ambientColor = new Color3(0.5, 0.5, 0.5);
 
-    this.camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2, 32, new Vector3(0, 12, 0), this.scene);
-    this.camera.minZ = 0.1;
-    this.camera.maxZ = 5000;
-    this.camera.wheelDeltaPercentage = 0.01;
-    this.camera.lowerRadiusLimit = 1;
-    this.camera.upperRadiusLimit = 500;
-    this.camera.attachControl(this.canvas, false);
+    this.arcCamera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2, 32, new Vector3(0, 12, 0), this.scene);
+    this.arcCamera.minZ = 0.1;
+    this.arcCamera.maxZ = 5000;
+    this.arcCamera.wheelDeltaPercentage = 0.01;
+    this.arcCamera.lowerRadiusLimit = 1;
+    this.arcCamera.upperRadiusLimit = 500;
+    this.arcCamera.attachControl(this.canvas, false);
+
+    // The orbit camera stays the scene's active camera; the MMD camera is only
+    // made active while "track baked camera" is on and a clip has camera data.
+    this.mmdCamera = new MmdCamera("mmdCamera", new Vector3(0, 10, 0), this.scene, false);
 
     const hemi = new HemisphericLight("hemi", new Vector3(0, 1, 0), this.scene);
     hemi.intensity = 0.7;
@@ -135,6 +160,9 @@ export class MmdRenderer implements CharacterRenderer {
 
     this.vmdLoader = new VmdLoader(this.scene);
     this.scene.onBeforeRenderObservable.add(() => this.updateTalk());
+    // Runs at frame start, before the runtime's own beforePhysics (registered
+    // later in initRuntime), so a queued clip swap applies cleanly from frame 0.
+    this.scene.onBeforeAnimationsObservable.add(() => this.advancePending());
 
     this.engine.runRenderLoop(() => this.scene.render());
     this.onResize = () => this.engine.resize();
@@ -171,10 +199,23 @@ export class MmdRenderer implements CharacterRenderer {
     this.scene.enablePhysics(new Vector3(0, -98, 0), plugin);
     this.runtime = new MmdRuntime(this.scene, new MmdAmmoPhysics(this.scene));
     this.runtime.register(this.scene);
+    // Drive the MMD camera off the same clock as the model, so its baked camera
+    // track stays in sync with the body motion.
+    this.runtime.addAnimatable(this.mmdCamera);
+    // A clip pauses on reaching its end: advance to the next queued clip, or
+    // loop the last one when the sequence loops.
     this.runtime.onPauseAnimationObservable.add(() => {
-      if (!this.looping) return;
+      const model = this.active;
+      if (!model) return;
       const duration = this.runtime.animationFrameTimeDuration;
-      if (duration > 0 && this.runtime.currentFrameTime >= duration - 1e-3) {
+      const atEnd = duration > 0 && this.runtime.currentFrameTime >= duration - 1e-3;
+      if (!atEnd) return;
+      if (this.stepIndex < this.steps.length - 1) {
+        // Defer the swap: switching handles here (mid-beforePhysics) would flash
+        // the bind pose. advancePending() does it at the next frame start.
+        this.pendingAdvance = true;
+      } else if (this.loopLast) {
+        // Looping reuses the same handle (no swap, no reset), so restart inline.
         this.runtime.seekAnimation(0, true);
         void this.runtime.playAnimation();
       }
@@ -190,18 +231,30 @@ export class MmdRenderer implements CharacterRenderer {
     const model = await this.ensureModel();
     if (!model) return;
 
-    const baseCandidates = vmdCandidates(emote.emote);
-
+    // The "preanim" phase is a one-shot preview of this emote's intro; it does
+    // not loop the emote, so a following idle/talking re-enters from scratch.
     if (state === "preanim") {
       this.stopTalk();
-      const preanim = emote.preanim ? vmdCandidates(emote.preanim) : null;
-      const handle = await this.resolveHandle(model, preanim ?? baseCandidates);
-      if (handle) this.playHandle(model, handle, false);
+      const steps = await this.resolveSteps(model, [emote.preanim ?? emote.emote]);
+      if (steps.length) this.playSteps(model, steps, false);
+      // Not looping an emote anymore, so idle/talking next re-enters cleanly.
+      this.playingEmote = null;
       return;
     }
 
-    const handle = await this.resolveHandle(model, baseCandidates);
-    if (handle && model.playing !== handle) this.playHandle(model, handle, true);
+    // Toggling idle <-> talking on the same emote keeps the running loop; only
+    // an emote change rebuilds the transition sequence.
+    const prev = this.playingEmote;
+    if (!prev || prev.id !== emote.id) {
+      const names: string[] = [];
+      if (prev?.postanim) names.push(prev.postanim); // outro of the emote we leave
+      if (emote.preanim) names.push(emote.preanim); // intro of the emote we enter
+      names.push(emote.emote); // the loop
+      const steps = await this.resolveSteps(model, names);
+      if (steps.length) this.playSteps(model, steps, true);
+      this.playingEmote = emote;
+    }
+
     if (state === "talking") this.startTalk();
     else this.stopTalk();
   }
@@ -210,8 +263,10 @@ export class MmdRenderer implements CharacterRenderer {
   async playRaw(baseName: string): Promise<void> {
     const model = await this.ensureModel();
     if (!model) return;
-    const handle = await this.resolveHandle(model, vmdCandidates(baseName));
-    if (handle) this.playHandle(model, handle, true);
+    const steps = await this.resolveSteps(model, [baseName]);
+    if (steps.length) this.playSteps(model, steps, true);
+    // A raw clip leaves no emote to transition out of.
+    this.playingEmote = null;
   }
 
   dispose(): void {
@@ -271,8 +326,8 @@ export class MmdRenderer implements CharacterRenderer {
         radius,
       };
       this.active = model;
-      this.camera.setTarget(target);
-      this.camera.radius = radius;
+      this.arcCamera.setTarget(target);
+      this.arcCamera.radius = radius;
       this.engine.resize();
       return model;
     } catch (err) {
@@ -281,12 +336,61 @@ export class MmdRenderer implements CharacterRenderer {
     }
   }
 
-  private playHandle(model: LoadedModel, handle: MmdRuntimeAnimationHandle, loop: boolean): void {
-    this.looping = loop;
-    model.mmdModel.setRuntimeAnimation(handle);
-    model.playing = handle;
+  /** Resolve clip names to steps in order, skipping any that don't load. */
+  private async resolveSteps(model: LoadedModel, names: string[]): Promise<Step[]> {
+    const steps: Step[] = [];
+    for (const name of names) {
+      const step = await this.resolveStep(model, vmdCandidates(name));
+      if (step) steps.push(step);
+    }
+    return steps;
+  }
+
+  /** Start playing a clip sequence; the last clip loops when `loopLast`. */
+  private playSteps(model: LoadedModel, steps: Step[], loopLast: boolean): void {
+    this.steps = steps;
+    this.stepIndex = 0;
+    this.loopLast = loopLast;
+    this.pendingAdvance = false;
+    if (steps.length > 0) this.playStep(model);
+  }
+
+  /** Apply a queued clip swap at frame start (see the onPause handler). */
+  private advancePending(): void {
+    if (!this.pendingAdvance) return;
+    const model = this.active;
+    if (!model) return;
+    this.pendingAdvance = false;
+    this.stepIndex++;
+    this.playStep(model);
+  }
+
+  private playStep(model: LoadedModel): void {
+    const step = this.steps[this.stepIndex];
+    model.mmdModel.setRuntimeAnimation(step.model);
+    model.playing = step.model;
+    this.mmdCamera.setRuntimeAnimation(step.camera);
     this.runtime.seekAnimation(0, true);
     void this.runtime.playAnimation();
+    this.updateActiveCamera(step.hasCamera);
+  }
+
+  /** Switch to the MMD camera only while tracking and the clip has camera data. */
+  private updateActiveCamera(clipHasCamera: boolean): void {
+    if (this.trackCamera && clipHasCamera) {
+      if (this.scene.activeCamera !== this.mmdCamera) {
+        this.arcCamera.detachControl();
+        this.scene.activeCamera = this.mmdCamera;
+      }
+    } else if (this.scene.activeCamera !== this.arcCamera) {
+      this.scene.activeCamera = this.arcCamera;
+      this.arcCamera.attachControl(this.canvas, false);
+    }
+  }
+
+  setCameraTracking(on: boolean): void {
+    this.trackCamera = on;
+    this.updateActiveCamera(this.steps[this.stepIndex]?.hasCamera ?? false);
   }
 
   private startTalk(): void {
@@ -325,21 +429,25 @@ export class MmdRenderer implements CharacterRenderer {
     }
   }
 
-  private async resolveHandle(
-    model: LoadedModel,
-    candidates: string[],
-  ): Promise<MmdRuntimeAnimationHandle | null> {
+  /** First loadable candidate as a Step: model + camera runtime animations. */
+  private async resolveStep(model: LoadedModel, candidates: string[]): Promise<Step | null> {
     for (const rel of candidates) {
       const url = this.char.source.url(rel);
       if (!url) continue;
-      const cached = model.handles.get(url);
-      if (cached) return cached;
       const anim = await this.loadMotion(url);
-      if (anim) {
-        const handle = model.mmdModel.createRuntimeAnimation(anim);
-        model.handles.set(url, handle);
-        return handle;
+      if (!anim) continue;
+
+      let modelHandle = model.handles.get(url);
+      if (!modelHandle) {
+        modelHandle = model.mmdModel.createRuntimeAnimation(anim);
+        model.handles.set(url, modelHandle);
       }
+      let cameraHandle = this.cameraHandles.get(url);
+      if (!cameraHandle) {
+        cameraHandle = this.mmdCamera.createRuntimeAnimation(anim);
+        this.cameraHandles.set(url, cameraHandle);
+      }
+      return { model: modelHandle, camera: cameraHandle, hasCamera: anim.cameraTrack.frameNumbers.length > 0 };
     }
     return null;
   }
@@ -379,7 +487,7 @@ export class MmdRenderer implements CharacterRenderer {
     const viewBottom = minY - charHeight * 0.04;
     return {
       target: new Vector3(0, (viewTop + viewBottom) / 2, 0),
-      radius: (viewTop - viewBottom) / 2 / Math.tan(this.camera.fov / 2),
+      radius: (viewTop - viewBottom) / 2 / Math.tan(this.arcCamera.fov / 2),
     };
   }
 

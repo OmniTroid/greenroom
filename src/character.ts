@@ -11,8 +11,10 @@ export interface EmoteEntry {
   desc: string;
   /** Sprite/motion base name (the animation stem). */
   emote: string;
-  /** Pre-animation base name, or null if none ("-"). */
+  /** Pre-animation (intro), played once before the loop, or null if none. */
   preanim: string | null;
+  /** Post-animation (outro), played once when leaving this emote, or null. */
+  postanim: string | null;
 }
 
 /**
@@ -46,11 +48,18 @@ export async function loadCharacter(source: AssetSource, name: string): Promise<
   // aolib-ts normalizes both encodings: `[emote]` blocks give `anim`/`preanim`
   // as full filenames with extension; legacy banks give bare stems and a null
   // preanim for "-". Renderers accept either (see the mmd renderer).
+  // `postanim` isn't modeled by aolib-ts yet, so read it from the raw block
+  // section (its sanctioned escape hatch); legacy emotes have no block, so null.
+  const norm = (v: string | undefined): string | null => {
+    const s = v?.trim();
+    return s && s !== "-" ? s.toLowerCase() : null;
+  };
   const emotes: EmoteEntry[] = charIni.emotes.map((e) => ({
     id: e.id,
     desc: e.name,
     emote: e.anim.toLowerCase(),
     preanim: e.preanim ? e.preanim.toLowerCase() : null,
+    postanim: norm(charIni.sections[`emote ${e.key.toLowerCase()}`]?.postanim),
   }));
 
   return {
