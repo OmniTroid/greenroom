@@ -52,27 +52,19 @@ export async function loadCharacter(source: AssetSource, name: string): Promise<
   const charIni = parseCharIni(await source.text("char.ini"));
 
   const model = (charIni.options.model ?? "").trim().toLowerCase();
-  // aolib-ts normalizes both encodings: `[emote]` blocks give `anim`/`preanim`
-  // as full filenames with extension; legacy banks give bare stems and a null
-  // preanim for "-". Renderers accept either (see the mmd renderer).
-  // `postanim`/`camera` aren't modeled by aolib-ts yet, so read them from the
-  // raw block section (its sanctioned escape hatch); legacy emotes have no
-  // block, so null.
-  const norm = (v: string | undefined): string | null => {
-    const s = v?.trim();
-    return s && s !== "-" ? s.toLowerCase() : null;
-  };
-  const emotes: EmoteEntry[] = charIni.emotes.map((e, i) => {
-    const block = charIni.sections[`emote ${e.key.toLowerCase()}`];
-    return {
-      id: i + 1,
-      desc: e.name,
-      emote: e.anim.toLowerCase(),
-      preanim: e.preanim ? e.preanim.toLowerCase() : null,
-      postanim: norm(block?.postanim),
-      camera: norm(block?.camera),
-    };
-  });
+  // aolib-ts normalizes both encodings: `[emote]` blocks give the animation
+  // fields as full filenames with extension; legacy banks give bare stems and
+  // null for absent ones. Renderers accept either (see the mmd renderer).
+  // Emotes are a sorted list, so the id is just the position.
+  const lower = (v: string | null): string | null => v?.toLowerCase() ?? null;
+  const emotes: EmoteEntry[] = charIni.emotes.map((e, i) => ({
+    id: i + 1,
+    desc: e.name,
+    emote: e.anim.toLowerCase(),
+    preanim: lower(e.preanim),
+    postanim: lower(e.postanim),
+    camera: lower(e.camera),
+  }));
 
   return {
     name,
